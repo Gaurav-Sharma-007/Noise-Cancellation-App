@@ -1,11 +1,5 @@
 import streamlit as st
 import os
-import numpy as np
-import librosa
-import librosa.display
-import matplotlib.pyplot as plt
-import soundfile as sf
-from inference import denoise_audio
 
 # Set page configuration
 st.set_page_config(
@@ -14,6 +8,17 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Show loading status immediately
+with st.spinner("Initializing AI engine..."):
+    import numpy as np
+    import librosa
+    import librosa.display
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import soundfile as sf
+    from inference import denoise_audio
 
 # Custom CSS for Premium Look
 st.markdown("""
@@ -64,17 +69,83 @@ st.markdown("""
 st.markdown('<div class="main-header">SonicPure</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">AI-Powered Noise Cancellation Studio</div>', unsafe_allow_html=True)
 
-# Sidebar
-with st.sidebar:
+# Navigation
+page = st.sidebar.radio("Navigation", ["Home", "Training Dashboard"])
+
+if page == "Training Dashboard":
+    st.markdown("### 📊 Model Training Metrics")
+    
+    METRICS_PATH = "training_metrics.json"
+    if os.path.exists(METRICS_PATH):
+        try:
+            import json
+            import pandas as pd
+            
+            with open(METRICS_PATH, "r") as f:
+                metrics = json.load(f)
+                
+            # Key Metrics
+            col1, col2, col3 = st.columns(3)
+            eval_data = metrics.get("evaluation", {})
+            history = metrics.get("history", {})
+            
+            with col1:
+                st.metric("Final Test Loss", f"{eval_data.get('test_loss', 0):.4f}")
+            with col2:
+                st.metric("SNR Improvement", f"{eval_data.get('snr_improvement', 0):.2f} dB")
+            with col3:
+                st.metric("Final SNR", f"{eval_data.get('final_snr', 0):.2f} dB") # Changed to Final SNR
+                
+            st.markdown("---")
+            
+            # Loss Curve
+            st.subheader("📉 Training Loss Curve")
+            if 'loss' in history and 'val_loss' in history:
+                chart_data = pd.DataFrame({
+                    'Training Loss': history['loss'],
+                    'Validation Loss': history['val_loss']
+                })
+                st.line_chart(chart_data)
+                st.caption("Lower loss is better. Convergence indicates successful learning.")
+            else:
+                st.info("No detailed history available.")
+                
+            # Explanation
+            st.info("""
+            **Metrics Explanation:**
+            - **SNR (Signal-to-Noise Ratio):** Measures signal quality. Higher is better.
+            - **Loss (MAE/MSE):** Measures reconstruction error. Lower is better.
+            - **Validation Loss:** Performance on unseen 'Test' data.
+            """)
+            
+        except Exception as e:
+            st.error(f"Error reading metrics: {e}")
+    else:
+        st.warning("No training data found.")
+        st.markdown("Run `python train.py` after adding data to `dataset/` to generate metrics.")
+
+    # Stop execution for this page
+    st.stop()
+
+# Home Page Logic (Existing)
+# ...
     st.header("Settings")
-    st.info("Currently using Pre-trained Conv1D Autoencoder.")
+    import os
+    if os.path.exists("denoiser_weights.h5"):
+        st.success("Mode: **Deep Learning (U-Net)**")
+        st.caption("Using your custom trained model.")
+    else:
+        st.warning("Mode: **Spectral Gating (DSP)**")
+        st.caption("No trained model found. Using fallback.")
+        st.markdown("To train: put data in `dataset/` and run `python train.py`")
+        
     st.markdown("---")
-    st.write("Supported Formats: MP3, WAV, FLAC")
+    st.write("Supported Formats: MP3, WAV, FLAC, WEBM")
     st.markdown("---")
     st.caption("Powered by TensorFlow & Librosa")
 
 # Main Content
-uploaded_file = st.file_uploader("Upload your audio file to begin", type=['mp3', 'wav', 'flac'])
+uploaded_file = st.file_uploader("Upload your audio file to begin", type=['mp3', 'wav', 'flac', 'webm'])
 
 if uploaded_file is not None:
     st.markdown("### 🎧 Analysis & Processing")
@@ -82,7 +153,8 @@ if uploaded_file is not None:
     col1, col2 = st.columns(2)
     
     # Save uploaded file temporarily for processing
-    temp_input_path = "temp_input.wav"
+    file_ext = os.path.splitext(uploaded_file.name)[1]
+    temp_input_path = f"temp_input{file_ext}"
     with open(temp_input_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
         
@@ -93,12 +165,31 @@ if uploaded_file is not None:
         
         # Visualize Original
         with st.expander("View Waveform", expanded=True):
-            y, sr = librosa.load(temp_input_path, sr=None)
-            fig, ax = plt.subplots(figsize=(10, 4), facecolor='#0E1117')
-            librosa.display.waveshow(y, sr=sr, alpha=0.8, ax=ax, color='#FF5252')
-            ax.set_facecolor('#0E1117')
-            ax.axis('off')
-            st.pyplot(fig)
+            try:
+                # Load with librosa
+                y, sr = librosa.load(temp_input_path, sr=None)
+                
+                fig, ax = plt.subplots(figsize=(10, 4), facecolor='#0E1117')
+                # Try simple plot first to ensure it works
+                times = np.linspace(0, len(y) / sr, num=len(y))
+                # Downsample for performance/rendering if file is large
+                if len(y) > 10000:
+                    step = len(y) // 10000
+                    y_plot = y[::step]
+                    times_plot = times[::step]
+                else:
+                    y_plot = y
+                    times_plot = times
+                
+                ax.plot(times_plot, y_plot, color='#FF5252', alpha=0.8)
+                ax.set_facecolor('#0E1117')
+                ax.axis('off')
+                # Tight layout to remove white margins
+                plt.tight_layout()
+                st.pyplot(fig)
+            except Exception as e:
+                st.error(f"Could not generate waveform: {e}")
+                st.caption("Tip: For MP3/WebM, ensure FFmpeg is installed.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # Process Button

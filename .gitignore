@@ -3,3 +3,13 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Data
+dataset/clean/*
+dataset/noisy/*
+!dataset/clean/README.txt
+!dataset/noisy/README.txt
+
+# Temp
+temp_input.mp3
+temp_output.wav
